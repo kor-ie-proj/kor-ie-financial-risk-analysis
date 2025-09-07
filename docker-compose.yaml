@@ -1,0 +1,116 @@
+version: '3.9'
+
+services:
+    be:
+        build: ./be
+        container_name: be
+        environment:
+            - DB_HOST=mysql
+            - DB_PORT=3306
+            - DB_USER=${MYSQL_USER}
+            - DB_PASSWORD=${MYSQL_PASSWORD}
+            - DB_NAME=${MYSQL_DATABASE}
+            - INFERENCE_URL=http://inference:8000
+        depends_on: [mysql, inference]
+        networks: [risknet]
+
+    inference:
+        build: ./inference
+        container_name: inference
+        environment:
+            - DB_HOST=mysql
+            - DB_PORT=3306
+            - DB_USER=${MYSQL_USER}
+            - DB_PASSWORD=${MYSQL_PASSWORD}
+            - DB_NAME=${MYSQL_DATABASE}
+            - MLFLOW_TRACKING_URI=http://mlflow:5000
+            - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+            - AWS_ACCESS_KEY_ID=${MINIO_ACCESS_KEY}
+            - AWS_SECRET_ACCESS_KEY=${MINIO_SECRET_KEY}
+            - MODEL_BUCKET=models
+            - MODEL_ARTIFACT_PATH=model.pkl
+        depends_on: [mysql, mlflow, minio]
+        networks: [risknet]
+
+    training:
+        build: ./training
+        container_name: training
+        environment:
+            - MLFLOW_TRACKING_URI=http://mlflow:5000
+            - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+            - AWS_ACCESS_KEY_ID=${MINIO_ACCESS_KEY}
+            - AWS_SECRET_ACCESS_KEY=${MINIO_SECRET_KEY}
+            - MODEL_BUCKET=models
+            - MODEL_ARTIFACT_PATH=model.pkl
+        depends_on: [mlflow, minio]
+        networks: [risknet]
+
+    mlflow:
+        build: ./mlflow
+        container_name: mlflow
+        environment:
+            - BACKEND_STORE_URI=mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}_mlflow
+            - ARTIFACT_ROOT=s3://mlflow/
+            - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+            - AWS_ACCESS_KEY_ID=${MINIO_ACCESS_KEY}
+            - AWS_SECRET_ACCESS_KEY=${MINIO_SECRET_KEY}
+        depends_on: [mysql, minio]
+        networks: [risknet]
+
+    minio:
+        image: minio/minio:latest
+        container_name: minio
+        environment:
+            - MINIO_ROOT_USER=${MINIO_ACCESS_KEY}
+            - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY}
+        command: server /data --console-address ":9001"
+        volumes:
+            - minio_data:/data
+        networks: [risknet]
+
+    mysql:
+        image: mysql:8.0
+        container_name: mysql
+        command: --default-authentication-plugin=mysql_native_password
+        environment:
+            - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+            - MYSQL_DATABASE=${MYSQL_DATABASE}
+            - MYSQL_USER=${MYSQL_USER}
+            - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+        volumes:
+            - mysql_data:/var/lib/mysql
+            - ./db/init:/docker-entrypoint-initdb.d
+        networks: [risknet]
+
+    fetcher:
+        build: ./fetcher
+        container_name: fetcher
+        environment:
+            - DB_HOST=mysql
+            - DB_PORT=3306
+            - DB_USER=${MYSQL_USER}
+            - DB_PASSWORD=${MYSQL_PASSWORD}
+            - DB_NAME=${MYSQL_DATABASE}
+            - INTERVAL_SEC=60
+        depends_on: [mysql]
+        networks: [risknet]
+
+    cloudflared:
+        image: cloudflare/cloudflared:latest
+        container_name: cloudflared
+        restart: unless-stopped
+        command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+        # config.yml 사용 시 command: tunnel run
+        volumes:
+            - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
+            # 자격파일 방식이면 아래 추가 (TUNNEL_ID.json)
+            # - ./cloudflared/<TUNNEL_ID>.json:/etc/cloudflared/<TUNNEL_ID>.json:ro
+        depends_on: [be, mlflow, minio]
+        networks: [risknet]
+
+networks:
+    risknet:
+
+volumes:
+    mysql_data:
+    minio_data:

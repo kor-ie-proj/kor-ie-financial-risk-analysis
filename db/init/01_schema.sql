@@ -1,0 +1,23 @@
+CREATE DATABASE IF NOT EXISTS riskdb_mlflow;
+
+CREATE TABLE IF NOT EXISTS companies (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  corp_code VARCHAR(64) UNIQUE,
+  corp_name VARCHAR(255)
+);
+
+CREATE TABLE IF NOT EXISTS economic_indicators (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  indicator_date DATE,
+  base_rate DECIMAL(5,2),
+  ccsi INT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS predictions (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  corp_code VARCHAR(64),
+  ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  predicted_roe DECIMAL(10,4),
+  risk_score DECIMAL(10,4)
+);
