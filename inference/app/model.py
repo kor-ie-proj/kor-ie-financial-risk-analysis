@@ -1,18 +1,23 @@
-class DummyModel:
-    def predict_fs(self, features: dict) -> dict:
-        base = float(features.get("base_rate", 3.0))
-        ccsi = float(features.get("ccsi", 100))
-        next_roe = (ccsi / 100.0) - (base * 0.05)
-        return {"next_quarter_roe": round(next_roe, 4)}
+# inference_server/model.py
 
-    def risk_score(self, fs_pred: dict, features: dict) -> float:
-        roe = float(fs_pred["next_quarter_roe"])
-        liabilities = float(features.get("total_liabilities", 0))
-        assets = float(features.get("total_assets", 1))
-        leverage = liabilities / max(assets, 1e-6)
-        raw = (1 - max(min(roe, 1), -1)) * 0.5 + min(leverage, 2.0) * 0.25
-        return round(min(max(raw, 0.0), 1.0), 4)
+import torch.nn as nn
 
-def load_model():
-    # TODO: MLflow/MinIO에서 최신 모델 로드
-    return DummyModel()
+class MultivariateLSTM(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, output_size, dropout_rate=0.2):
+        super(MultivariateLSTM, self).__init__()
+        self.lstm = nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout_rate if num_layers > 1 else 0,
+            batch_first=True
+        )
+        self.dropout = nn.Dropout(dropout_rate)
+        self.fc = nn.Linear(hidden_size, output_size)
+
+    def forward(self, x):
+        lstm_out, _ = self.lstm(x)
+        last_output = lstm_out[:, -1, :]
+        output = self.dropout(last_output)
+        output = self.fc(output)
+        return output

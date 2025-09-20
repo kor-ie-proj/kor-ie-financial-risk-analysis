@@ -1,0 +1,11 @@
+fastapi 
+uvicorn[standard] 
+sqlalchemy 
+pymysql
+pandas 
+scikit-learn 
+torch 
+optuna 
+mlflow 
+boto3 
+cloudpickle
