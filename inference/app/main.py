@@ -100,3 +100,31 @@ async def predict(request: Request, options: PredictionOptions = PredictionOptio
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    
+@app.post("/update_model")
+async def update_model(request: Request):
+    try:
+        client = mlflow.tracking.MlflowClient(tracking_uri=MLFLOW_TRACKING_URI)
+        latest_version = client.get_latest_versions(MODEL_NAME, stages=[MODEL_STAGE])[0]
+        run_id = latest_version.run_id
+        model_uri = f"runs:/{run_id}/lstm_model"
+        
+        print(f"Updating model from: {model_uri} (Version: {latest_version.version}, Stage: {MODEL_STAGE})")
+
+        # 새로운 모델과 아티팩트를 로드하여 app.state에 업데이트
+        new_model = mlflow.pytorch.load_model(model_uri, map_location=DEVICE)
+        
+        local_path = mlflow.artifacts.download_artifacts(run_id=run_id, artifact_path="model_artifacts")
+        with open(os.path.join(local_path, "artifacts.pkl"), 'rb') as f:
+            new_artifacts = pickle.load(f)
+
+        request.app.state.model = new_model
+        request.app.state.artifacts = new_artifacts
+
+        print("--- Model and artifacts updated successfully! ---")
+        
+        return {"message": f"Model updated to version {latest_version.version} from stage {MODEL_STAGE}"}
+
+    except Exception as e:
+        print(f"Error updating model: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update model: {str(e)}")
