@@ -17,7 +17,7 @@ import tempfile
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import os
 
-from .model import MultivariateLSTM
+from model import MultivariateLSTM
 
 warnings.filterwarnings('ignore')
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -31,7 +31,7 @@ def preprocess_and_feature_engineer(df_raw: pd.DataFrame):
     df = df.sort_values('date').set_index('date')
     
     # 타겟 컬럼 확인
-    target_columns = ['construction_bsi_actual', 'base_rate', 'housing_sale_price', 'm2_growth', 'credit_spread']
+    target_columns = ['construction_bsi_actual', 'base_rate', 'housing_sale_price', 'm2_growth']
     available_targets = [col for col in target_columns if col in df.columns]
     
     # 결측치 처리 (선형 보간)
@@ -490,12 +490,17 @@ def run_training(db_uri: str):
                     pickle.dump(artifacts, f)
                 
                 # MLflow에 로깅
+                # 현재 training 컨테이너의 requirements.txt 경로
+                requirements_path = "requirements.txt" 
                 mlflow.pytorch.log_model(
                     pytorch_model=final_model.cpu(), 
                     artifact_path="lstm_model",
-                    pickle_module="cloudpickle"
+                    # requirements.txt 파일을 직접 지정하여 requirements.txt 추측 시 에러 fallback 방지
+                    pip_requirements=requirements_path 
                 )
-                mlflow.log_artifact(artifacts_path, "model_artifacts")
+
+                # 추가 아티팩트 저장
+                mlflow.log_artifact(artifacts_path, artifact_path="model_artifacts")
             
             return {
                 "status": "success", 

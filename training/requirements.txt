@@ -6,7 +6,6 @@ pandas
 scikit-learn 
 torch 
 optuna 
-mlflow 
+mlflow==2.14.2
 boto3 
-cloudpickle
 pymysql

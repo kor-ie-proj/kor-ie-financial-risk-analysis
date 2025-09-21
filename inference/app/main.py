@@ -9,8 +9,8 @@ from pydantic import BaseModel, Field
 from typing import List, Dict, Any
 
 # 로직 및 모델 클래스 import
-from .inference_logic import predict_next_step_from_db
-from .model import MultivariateLSTM
+from inference_logic import predict_next_step
+from model import MultivariateLSTM
 
 # --- 환경 변수 및 설정 ---
 # (docker-compose.yml에서 주입되지만, 코드 내에서 변수로 사용하기 위해 로드)
@@ -41,6 +41,14 @@ async def lifespan(app: FastAPI):
             app.state.artifacts = pickle.load(f)
 
         print("--- Model and artifacts loaded successfully! ---")
+
+        # debugging info
+        print("Artifacts keys:", app.state.artifacts.keys())
+        print("Target columns:", app.state.artifacts.get("target_columns"))
+        print("Final features count:", len(app.state.artifacts.get("final_features", [])))
+        print("Scaler_X shape:", getattr(app.state.artifacts.get("scaler_X"), "mean_", None).shape if app.state.artifacts.get("scaler_X") else None)
+        print("Scaler_Y shape:", getattr(app.state.artifacts.get("scaler_y"), "mean_", None).shape if app.state.artifacts.get("scaler_y") else None)
+        
     except Exception as e:
         print(f"FATAL: Error loading model during startup: {e}")
         raise RuntimeError(f"Failed to load model from MLflow: {e}") from e
@@ -79,7 +87,7 @@ async def predict(request: Request, options: PredictionOptions = PredictionOptio
     
     try:
         # DB에서 직접 데이터를 가져와 예측하는 로직 호출
-        result = predict_next_step_from_db(
+        result = predict_next_step(
             db_uri=DATABASE_URI,
             model=model, 
             artifacts=artifacts,

@@ -48,6 +48,7 @@ def preprocess_for_inference(df_raw: pd.DataFrame, final_features: list, availab
         
     return df[final_features]
 
+# === 재귀적 예측이 아닌 고정된 차분값 누적 예측
 def predict_next_step(
     db_uri: str, 
     model: torch.nn.Module, 
@@ -55,74 +56,142 @@ def predict_next_step(
     months_to_predict: int
 ) -> Dict[str, Any]:
     """
-    DB에서 데이터를 로드하고, n개월 후를 예측하는 메인 함수
+    DB에서 데이터를 로드하고, n개월 후를 예측하는 함수
+    - 훈련 시 사용한 predict_future_improved 방식과 동일하게 동작
     """
     device = next(model.parameters()).device
     seq_length = artifacts['hyperparameters']['seq_length']
-    
-    # 1. DB에서 예측에 필요한 최신 데이터 로드
-    # seq_length에 피처 엔지니어링 시 발생하는 결측치(최대 lag=6)를 고려하여 넉넉하게 데이터를 가져옵니다.
-    required_rows = seq_length + 10 
+    available_targets = artifacts['target_columns']
+    scaler_X = artifacts['scaler_X']
+    scaler_y = artifacts['scaler_y']
+
+    # 1. DB에서 최신 데이터 가져오기
     try:
         engine = create_engine(db_uri)
-        query = f"SELECT * FROM ecos_data ORDER BY date DESC LIMIT {required_rows}"
+        query = f"SELECT * FROM ecos_data ORDER BY date ASC"
         df_raw = pd.read_sql(query, engine)
-        # 시간 순서를 맞추기 위해 다시 정렬
-        df_raw = df_raw.sort_values('date', ascending=True).reset_index(drop=True)
     except Exception as e:
         raise ConnectionError(f"Failed to connect to the database or query data: {e}")
 
     if len(df_raw) < seq_length:
         raise ValueError(f"Not enough data in DB. Required at least {seq_length} rows, but got {len(df_raw)}.")
-        
-    model.eval()
 
-    # 2. 다중 스텝 예측(Multi-step Forecasting) 로직
-    final_predictions = []
-    current_df = df_raw.copy()
+    # 시간 순서 맞추기
+    df_raw['date'] = pd.to_datetime(df_raw['date'], format='%Y%m')
+    df_raw = df_raw.sort_values('date').set_index('date')
+
+    # 2. 마지막 시퀀스 준비
+    X_processed = preprocess_for_inference(df_raw.reset_index(), artifacts['final_features'], available_targets)
+    last_sequence = X_processed.iloc[-seq_length:].values
+    last_sequence_scaled = scaler_X.transform(last_sequence)
+
+    # 3. 모델 예측 (차분값)
+    model.eval()
+    with torch.no_grad():
+        X_tensor = torch.FloatTensor(last_sequence_scaled).unsqueeze(0).to(device)
+        pred_scaled = model(X_tensor).cpu().numpy()
+        pred_diff = scaler_y.inverse_transform(pred_scaled)[0]
+        print("Prediction diff sample:", pred_diff[:5])
+
+    # 4. 차분값을 원시값으로 복원 (고정된 pred_diff를 순차 누적)
+    last_original_values = df_raw[available_targets].iloc[-1].values
+    predictions_original = []
+    current_values = last_original_values.copy()
 
     for _ in range(months_to_predict):
-        # 2-1. 현재 데이터프레임으로 전처리 수행
-        X_processed = preprocess_for_inference(
-            current_df, 
-            artifacts['final_features'], 
-            artifacts['target_columns']
-        )
-        
-        # 2-2. 마지막 시퀀스 준비
-        last_sequence = X_processed.iloc[-seq_length:].values
-        last_sequence_scaled = artifacts['scaler_X'].transform(last_sequence)
-        X_tensor = torch.FloatTensor(last_sequence_scaled).unsqueeze(0).to(device)
+        next_values = current_values + pred_diff
+        predictions_original.append(next_values.copy())
+        current_values = next_values
 
-        # 2-3. 1스텝 예측
-        with torch.no_grad():
-            prediction_scaled = model(X_tensor)
-        
-        # 2-4. 예측값을 차분값으로 역정규화
-        prediction_diff = artifacts['scaler_y'].inverse_transform(prediction_scaled.cpu().numpy())[0]
-        
-        # 2-5. 차분값을 원본 값으로 복원
-        last_original_values = current_df[artifacts['target_columns']].iloc[-1].values
-        predicted_values = last_original_values + prediction_diff
-        final_predictions.append(predicted_values)
-
-        # 2-6. 다음 예측을 위해 예측값을 입력 데이터에 추가
-        # 다음 달의 date 생성
-        next_date = (pd.to_datetime(current_df['date'].iloc[-1], format='%Y%m') + pd.DateOffset(months=1)).strftime('%Y%m')
-        
-        # 예측된 값을 포함하는 새로운 행(row) 생성
-        new_row = {'date': next_date}
-        for i, col in enumerate(artifacts['target_columns']):
-            new_row[col] = predicted_values[i]
-        
-        # current_df에 새로운 행 추가하여 다음 반복에 사용
-        current_df = pd.concat([current_df, pd.DataFrame([new_row])], ignore_index=True)
-
-    # 3. 최종 결과 포맷팅
-    final_predictions = np.array(final_predictions)
+    # 5. 결과 반환
+    predictions_original = np.nan_to_num(
+        np.array(predictions_original), nan=0.0, posinf=1e12, neginf=-1e12
+    )
     response = {
-        target: final_predictions[:, i].tolist() 
-        for i, target in enumerate(artifacts['target_columns'])
+        target: predictions_original[:, i].tolist()
+        for i, target in enumerate(available_targets)
     }
-    
+
     return {"predictions": response}
+
+
+# === 재귀적 예측
+# def predict_next_step(
+#     db_uri: str, 
+#     model: torch.nn.Module, 
+#     artifacts: Dict[str, Any], 
+#     months_to_predict: int
+# ) -> Dict[str, Any]:
+#     """
+#     DB에서 데이터를 로드하고, n개월 후를 예측하는 메인 함수
+#     """
+#     device = next(model.parameters()).device
+#     seq_length = artifacts['hyperparameters']['seq_length']
+    
+#     # 1. DB에서 예측에 필요한 최신 데이터 로드
+#     # seq_length에 피처 엔지니어링 시 발생하는 결측치(최대 lag=6)를 고려하여 넉넉하게 데이터를 가져옵니다.
+#     required_rows = seq_length + 10 
+#     try:
+#         engine = create_engine(db_uri)
+#         query = f"SELECT * FROM ecos_data ORDER BY date DESC LIMIT {required_rows}"
+#         df_raw = pd.read_sql(query, engine)
+#         # 시간 순서를 맞추기 위해 다시 정렬
+#         df_raw = df_raw.sort_values('date', ascending=True).reset_index(drop=True)
+#     except Exception as e:
+#         raise ConnectionError(f"Failed to connect to the database or query data: {e}")
+
+#     if len(df_raw) < seq_length:
+#         raise ValueError(f"Not enough data in DB. Required at least {seq_length} rows, but got {len(df_raw)}.")
+        
+#     model.eval()
+
+#     # 2. 다중 스텝 예측(Multi-step Forecasting) 로직
+#     final_predictions = []
+#     current_df = df_raw.copy()
+
+#     for _ in range(months_to_predict):
+#         # 2-1. 현재 데이터프레임으로 전처리 수행
+#         X_processed = preprocess_for_inference(
+#             current_df, 
+#             artifacts['final_features'], 
+#             artifacts['target_columns']
+#         )
+        
+#         # 2-2. 마지막 시퀀스 준비
+#         last_sequence = X_processed.iloc[-seq_length:].values
+#         last_sequence_scaled = artifacts['scaler_X'].transform(last_sequence)
+#         X_tensor = torch.FloatTensor(last_sequence_scaled).unsqueeze(0).to(device)
+
+#         # 2-3. 1스텝 예측
+#         with torch.no_grad():
+#             prediction_scaled = model(X_tensor)
+        
+#         # 2-4. 예측값을 차분값으로 역정규화
+#         prediction_diff = artifacts['scaler_y'].inverse_transform(prediction_scaled.cpu().numpy())[0]
+        
+#         # 2-5. 차분값을 원본 값으로 복원
+#         last_original_values = current_df[artifacts['target_columns']].iloc[-1].values
+#         predicted_values = last_original_values + prediction_diff
+#         predicted_values = np.nan_to_num(predicted_values, nan=0.0, posinf=1e12, neginf=-1e12)
+#         final_predictions.append(predicted_values)
+
+#         # 2-6. 다음 예측을 위해 예측값을 입력 데이터에 추가
+#         # 다음 달의 date 생성
+#         next_date = (pd.to_datetime(current_df['date'].iloc[-1], format='%Y%m') + pd.DateOffset(months=1)).strftime('%Y%m')
+        
+#         # 예측된 값을 포함하는 새로운 행(row) 생성
+#         new_row = {'date': next_date}
+#         for i, col in enumerate(artifacts['target_columns']):
+#             new_row[col] = predicted_values[i]
+        
+#         # current_df에 새로운 행 추가하여 다음 반복에 사용
+#         current_df = pd.concat([current_df, pd.DataFrame([new_row])], ignore_index=True)
+
+#     # 3. 최종 결과 포맷팅
+#     final_predictions = np.array(final_predictions)
+#     response = {
+#         target: final_predictions[:, i].tolist() 
+#         for i, target in enumerate(artifacts['target_columns'])
+#     }
+    
+#     return {"predictions": response}

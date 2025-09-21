@@ -5,7 +5,7 @@ from typing import Optional
 from datetime import datetime
 
 # training_logic.py의 run_training 함수를 import
-from .training_logic import run_training
+from training_logic import run_training
 
 # --- 환경 변수 로드 ---
 DATABASE_URI = os.environ.get("DATABASE_URI")

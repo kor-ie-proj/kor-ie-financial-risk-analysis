@@ -35,14 +35,14 @@ services:
         container_name: mlflow
         environment:
             # MLflow 전용 DB URI 변수 사용 (명확하게 수정)
-            - BACKEND_STORE_URI=${MLFLOW_BACKEND_STORE_URI}
+            - BACKEND_STORE_URI=${DB_URI}
             - ARTIFACT_ROOT=s3://${MLFLOW_ARTIFACT_BUCKET}
             # 클라이언트로서 MinIO에 연결하는 정보
             - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
             - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
             - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
         ports:
-            - '5000:5000'
+            - '5001:5000'
         depends_on:
             - mysql
             - minio

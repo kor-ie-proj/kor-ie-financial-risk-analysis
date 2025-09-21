@@ -1,12 +1,11 @@
 fastapi
 uvicorn[standard]
-mlflow
+mlflow==2.14.2
 torch
 scikit-learn
 pandas
 numpy
 boto3
 python-dotenv
-cloudpickle
 pymysql
 SQLAlchemy
