@@ -45,3 +45,34 @@ def format_predictions(predictions, last_date, target_columns):
     quarterly_df.index = [f"{d.year}Q{d.quarter}" for d in quarterly_df.index]
     
     return monthly_df.to_dict('index'), quarterly_df.to_dict('index')
+
+
+def predict_future_improved(model, X_last, scaler_X, scaler_y, df_original, available_targets, seq_length, n_months=3):
+    """
+    미래 예측 함수 - 차분값을 원시값으로 올바르게 복원
+    """
+    model.eval()
+    
+    # 마지막 시퀀스 준비
+    last_sequence = X_last[-seq_length:].copy()
+    last_sequence_scaled = scaler_X.transform(last_sequence)
+    
+    with torch.no_grad():
+        # 차분값 예측
+        X_tensor = torch.FloatTensor(last_sequence_scaled).unsqueeze(0).to(device)
+        pred_scaled = model(X_tensor).cpu().numpy()
+        pred_diff = scaler_y.inverse_transform(pred_scaled)[0]
+        
+        # 차분값을 원시값으로 복원
+        last_original_values = df_original[available_targets].iloc[-1].values
+        
+        predictions_original = []
+        current_values = last_original_values.copy()
+        
+        for month in range(n_months):
+            # 차분값을 더해서 원시값 계산
+            next_values = current_values + pred_diff
+            predictions_original.append(next_values.copy())
+            current_values = next_values
+    
+    return np.array(predictions_original)
