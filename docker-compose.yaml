@@ -1,20 +1,6 @@
 version: '3.9'
 
 services:
-    mlflow:
-        build: ./mlflow
-        container_name: mlflow
-        ports:
-            - '5000:5000'
-        environment:
-            - BACKEND_STORE_URI=mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}_mlflow
-            - ARTIFACT_ROOT=s3://mlflow/
-            - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
-            - AWS_ACCESS_KEY_ID=${MINIO_ACCESS_KEY}
-            - AWS_SECRET_ACCESS_KEY=${MINIO_SECRET_KEY}
-        depends_on: [mysql, minio]
-        networks: [risknet]
-
     minio:
         image: minio/minio:latest
         container_name: minio
@@ -22,8 +8,9 @@ services:
             - '9000:9000'
             - '9001:9001'
         environment:
-            - MINIO_ROOT_USER=${MINIO_ACCESS_KEY}
-            - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY}
+            # MinIO 서버 자체의 관리자 계정 설정 (명확하게 수정)
+            - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+            - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
         command: server /data --console-address ":9001"
         volumes:
             - minio_data:/data
@@ -43,18 +30,38 @@ services:
             - ./db/init:/docker-entrypoint-initdb.d
         networks: [risknet]
 
+    mlflow:
+        build: ./mlflow
+        container_name: mlflow
+        environment:
+            # MLflow 전용 DB URI 변수 사용 (명확하게 수정)
+            - BACKEND_STORE_URI=${MLFLOW_BACKEND_STORE_URI}
+            - ARTIFACT_ROOT=s3://${MLFLOW_ARTIFACT_BUCKET}
+            # 클라이언트로서 MinIO에 연결하는 정보
+            - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+            - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+            - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+        ports:
+            - '5000:5000'
+        depends_on:
+            - mysql
+            - minio
+        networks: [risknet]
+
     training:
         build: ./training
         container_name: training
         ports:
             - '8002:8000'
         environment:
+            - PYTHONUNBUFFERED=1
             - MLFLOW_TRACKING_URI=http://mlflow:5000
             - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
-            - AWS_ACCESS_KEY_ID=${MINIO_ACCESS_KEY}
-            - AWS_SECRET_ACCESS_KEY=${MINIO_SECRET_KEY}
+            # 클라이언트로서 MinIO/DB에 연결하는 정보
+            - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+            - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
             - AWS_S3_VERIFY_SSL=false
-            - DATABASE_URI={DB_URI}
+            - DATABASE_URI=${DB_URI}
             - MLFLOW_EXPERIMENT_NAME=LSTM_Financial_Forecast
         depends_on: [mysql, mlflow, minio]
         networks: [risknet]
@@ -65,30 +72,17 @@ services:
         ports:
             - '8001:8000'
         environment:
+            - PYTHONUNBUFFERED=1
             - MLFLOW_TRACKING_URI=http://mlflow:5000
             - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
-            - AWS_ACCESS_KEY_ID=${MINIO_ACCESS_KEY}
-            - AWS_SECRET_ACCESS_KEY=${MINIO_SECRET_KEY}
+            # 클라이언트로서 MinIO/DB에 연결하는 정보
+            - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+            - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
             - AWS_S3_VERIFY_SSL=false
-            - DATABASE_URI={DB_URI}
-            - MODEL_BUCKET={MODEL_BUCKET}
-            - MODEL_ARTIFACT_PATH={MODEL_ARTIFACT_PATH}
+            - DATABASE_URI=${DB_URI}
+            - MODEL_NAME=lstm_financial_forecast_model
+            - MODEL_STAGE=Production
         depends_on: [mysql, mlflow, minio]
-        networks: [risknet]
-
-    be:
-        build: ./be
-        container_name: be
-        ports:
-            - '8000:8000'
-        environment:
-            - DB_HOST=mysql
-            - DB_PORT=3306
-            - DB_USER=${MYSQL_USER}
-            - DB_PASSWORD=${MYSQL_PASSWORD}
-            - DB_NAME=${MYSQL_DATABASE}
-            - INFERENCE_URL=http://inference:8000
-        depends_on: [mysql, inference, training]
         networks: [risknet]
 
 networks:
