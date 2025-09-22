@@ -1,5 +1,20 @@
 # KOR-IE Finance Risk Assessment
 
+## Implemented containers
+
+- **db**: MySQL database container (3306:3306)
+- **mlflow**: MLflow tracking server (5001:5000)
+- **minio**: MinIO object storage for MLflow artifacts (9000:9000, 9001:9001)
+- **train**: Model training server (8002:8000)
+- **inference**: Model inference server (8001:8000)
+
+## Not Implemented containers (yet)
+
+- **inference**: risk assessment logic in inference server
+- **fetcher**: Data fetching and preprocessing server
+- **be**: Central backend server for orchestrating tasks
+- **fe**: Frontend server for user interface
+
 ## Initial Setup
 
 1. Clone the repository:
