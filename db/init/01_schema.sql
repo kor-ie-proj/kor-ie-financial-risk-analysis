@@ -1,3 +1,4 @@
+-- Active: 1752820234086@@127.0.0.1@3306@ie_project
 CREATE DATABASE IF NOT EXISTS IE_project;
 USE IE_project;
 
