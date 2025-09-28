@@ -2,7 +2,6 @@ CREATE DATABASE IF NOT EXISTS IE_project;
 USE IE_project;
 
 -- 1. ECOS 경제지표 데이터 테이블
--- 데이터 소스: ECOS_data.py (ECOS API)
 CREATE TABLE ecos_data (
 id INT AUTO_INCREMENT PRIMARY KEY,
 -- YYYYMM 형식
@@ -50,38 +49,40 @@ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 UNIQUE KEY unique_date (date)
 );
 
--- 2. DART 건설업 재무데이터 테이블
--- 데이터 소스: 건설10_11년로드_2015~2024_연결_분기재무_정규화.csv (DART API)
+-- 2. dart 제무제표 데이터 테이블
+DROP TABLE IF EXISTS dart_data;
 CREATE TABLE dart_data (
-id INT AUTO_INCREMENT PRIMARY KEY,
--- 기업명
-corp_name VARCHAR(50) NOT NULL,
--- 기업코드
-corp_code VARCHAR(8) NOT NULL,
--- 연도
-year INT NOT NULL,
--- 분기(Q1,Q2,Q3,Q4)
-quarter VARCHAR(2) NOT NULL,
--- 보고서기준일
-report_date DATE NOT NULL,
--- 자산총계
-total_assets DECIMAL(20, 2),
--- 부채총계
-total_liabilities DECIMAL(20, 2),
--- 자본총계
-total_equity DECIMAL(20, 2),
--- 매출액
-revenue DECIMAL(20, 2),
--- 영업이익
-operating_profit DECIMAL(20, 2),
--- 분기순이익
-quarterly_profit DECIMAL(20, 2),
-created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-UNIQUE KEY unique_corp_period (corp_name, year, quarter),
-INDEX idx_corp_name (corp_name),
-INDEX idx_report_date (report_date)
+  id INT AUTO_INCREMENT PRIMARY KEY,
+
+  -- identity
+  corp_name VARCHAR(100) NOT NULL,
+  year INT NOT NULL,
+  quarter VARCHAR(2) NOT NULL,            -- e.g., 'Q1', 'Q2', 'Q3', 'Q4'
+
+  -- absolute values
+  total_assets DECIMAL(20, 2),
+  total_liabilities DECIMAL(20, 2),
+  total_equity DECIMAL(20, 2),
+  revenue DECIMAL(20, 2),
+  operating_profit DECIMAL(20, 2),
+  quarterly_profit DECIMAL(20, 2),
+
+  -- ratios / growth (비율/성장률)
+  debt_ratio DECIMAL(12, 6),              -- 부채비율 (% 단위면 그대로 수치 삽입)
+  equity_ratio DECIMAL(12, 6),            -- 자기자본비율
+  roa DECIMAL(12, 6),
+  roe DECIMAL(12, 6),
+  revenue_growth DECIMAL(12, 6),
+  operating_profit_growth DECIMAL(12, 6),
+  net_income_growth DECIMAL(12, 6),
+
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  UNIQUE KEY unique_corp_period (corp_name, year, quarter),
+  INDEX idx_corp_name (corp_name)
 );
+
 
 -- 3. 모델 예측 결과 테이블
 -- 예측 결과: construction_bsi_actual, base_rate, housing_sale_price, m2_growth, credit_spread
