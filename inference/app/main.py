@@ -2,14 +2,13 @@ import os
 import pickle
 import mlflow
 import torch
-import pandas as pd
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
 
 # 로직 및 모델 클래스 import
-from inference_logic import predict_next_step
+from inference_logic import predict_next_step, run_heuristic_risk_inference
 from model import MultivariateLSTM
 
 # --- 환경 변수 및 설정 ---
@@ -71,6 +70,18 @@ class PredictionOptions(BaseModel):
 class PredictionOutput(BaseModel):
     predictions: Dict[str, List[float]]
 
+
+class RiskInferenceOptions(BaseModel):
+    corp_name: str = Field(
+        ..., description="Legal name of the corporation to evaluate", min_length=1
+    )
+    months_to_predict: int = Field(
+        3,
+        ge=1,
+        le=12,
+        description="Number of future months to feed into the heuristic risk model",
+    )
+
 # --- API 엔드포인트 ---
 @app.get("/")
 def read_root():
@@ -128,3 +139,29 @@ async def update_model(request: Request):
     except Exception as e:
         print(f"Error updating model: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to update model: {str(e)}")
+
+
+@app.post("/risk_inference")
+async def risk_inference(request: Request, options: RiskInferenceOptions):
+    model = request.app.state.model
+    artifacts = request.app.state.artifacts
+
+    if not model or not artifacts:
+        raise HTTPException(status_code=503, detail="Model is not available. Check server startup logs.")
+
+    try:
+        result = run_heuristic_risk_inference(
+            db_uri=DATABASE_URI,
+            model=model,
+            artifacts=artifacts,
+            corp_name=options.corp_name,
+            months_to_predict=options.months_to_predict,
+        )
+        return result
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=f"Data processing error: {str(ve)}")
+    except ConnectionError as ce:
+        raise HTTPException(status_code=502, detail=str(ce))
+    except Exception as e:
+        print(f"Unexpected error in risk_inference: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error during risk inference")

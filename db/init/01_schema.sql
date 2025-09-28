@@ -50,7 +50,6 @@ UNIQUE KEY unique_date (date)
 );
 
 -- 2. dart 제무제표 데이터 테이블
-DROP TABLE IF EXISTS dart_data;
 CREATE TABLE dart_data (
   id INT AUTO_INCREMENT PRIMARY KEY,
 
@@ -68,13 +67,13 @@ CREATE TABLE dart_data (
   quarterly_profit DECIMAL(20, 2),
 
   -- ratios / growth (비율/성장률)
-  debt_ratio DECIMAL(12, 6),              -- 부채비율 (% 단위면 그대로 수치 삽입)
-  equity_ratio DECIMAL(12, 6),            -- 자기자본비율
-  roa DECIMAL(12, 6),
-  roe DECIMAL(12, 6),
-  revenue_growth DECIMAL(12, 6),
-  operating_profit_growth DECIMAL(12, 6),
-  net_income_growth DECIMAL(12, 6),
+  debt_ratio DECIMAL(20, 10),              -- 부채비율 (% 단위면 그대로 수치 삽입)
+  equity_ratio DECIMAL(20, 10),            -- 자기자본비율
+  roa DECIMAL(20, 10),
+  roe DECIMAL(20, 10),
+  revenue_growth DECIMAL(20, 10),
+  operating_profit_growth DECIMAL(20, 10),
+  net_income_growth DECIMAL(20, 10),
 
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

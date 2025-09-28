@@ -17,3 +17,6 @@ minio_data/
 # IDE
 .vscode/
 .idea/
+
+# codex
+.prompt/
