@@ -85,6 +85,34 @@ services:
         depends_on: [mysql, mlflow, minio]
         networks: [risknet]
 
+    be:
+        build: ./be
+        container_name: be
+        ports:
+            - '8003:8000'
+        environment:
+            - PYTHONUNBUFFERED=1
+            - DATABASE_URI=${DB_URI}
+            - INFERENCE_SERVER_URL=http://inference:8000
+            - ALLOWED_ORIGINS=http://localhost:3000,http://frontend:3000
+            - RISK_THRESHOLD_HIGH=120
+            - RISK_THRESHOLD_MEDIUM=80
+        depends_on:
+            - mysql
+            - inference
+        networks: [risknet]
+
+    frontend:
+        build: ./frontend
+        container_name: frontend
+        ports:
+            - '3000:3000'
+        environment:
+            - NEXT_PUBLIC_API_BASE_URL=http://localhost:8003
+        depends_on:
+            - be
+        networks: [risknet]
+
 networks:
     risknet:
 
