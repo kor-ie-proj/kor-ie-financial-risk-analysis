@@ -2,6 +2,11 @@
 
 > local의 경우 `local-ver` 브랜치, production 배포의 경우 `prod-ver` 브랜치를 사용 필요
 
+## model Design and Operation
+
+- [Model Design and Operation (English)](model-en.md)
+- [모델 설계 및 운영 (한국어)](model-kr.md)
+
 ## Local Architecture
 
 The `local-ver` branch runs the entire workflow on a single machine via Docker containers. The services communicate over the `risknet` bridge network created by `docker-compose`:
