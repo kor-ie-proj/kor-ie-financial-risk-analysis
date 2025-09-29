@@ -446,9 +446,20 @@ async def get_company_manual_risk(
             detail=f"Failed to fetch manual risk inference result: {exc}",
         )
 
-    risk_payload = response.json()
-    if not isinstance(risk_payload, dict):
+    result = response.json()
+    if not isinstance(result, dict):
         raise HTTPException(status_code=502, detail="Unexpected response format from inference service.")
+
+    risk_payload = {
+        "corp_name": result.get("corp_name", corp_name),
+        "risk_score": result.get("heuristic_score"),
+        "risk_level": result.get("risk_level"),
+        "components": result.get("components", {}),
+        "ecos_quarters": result.get("ecos_quarters", {}),
+        "dart_vector": result.get("dart_vector", {}),
+        "mode": result.get("mode"),
+        "manual_adjustments": result.get("manual_adjustments"),
+    }
 
     return _build_risk_response(corp_name, risk_payload)
 
