@@ -49,9 +49,9 @@ training (FastAPI, :8002)
     cp .env.example .env
    ```
 
-3. ECOS data migration (only for the first time):
+3. ECOS/DART data migration (only for the first time / db/init 디렉토리에 초기화 스크립트가 없을 때만):
 
-   - `util` 디렉토리의 `ecos_insert.sql` 생성 스크립트를 통해 sql 파일을 생성
+   - `util` 디렉토리의 `ecos_insert.sql`, `dart_insert.sql` 생성 스크립트를 통해 sql 파일을 생성
    - `db/init` 에 `0x_nameOfSqlFile.sql` 형식으로 복사 시 자동으로 초기화 시점에 반영됨.
    - MySQL 컨테이너가 이미 실행 중이라면, `docker-compose down -v` 로 볼륨을 삭제 후 재기동 필요.
 
@@ -187,9 +187,9 @@ Cloudflared 터널이 올라와 있으면 외부 사용자는 `https://korie.hyz
     cp .env.example .env
    ```
 
-3. ECOS data migration (only for the first time):
+3. ECOS/DART data migration (only for the first time / db/init 디렉토리에 초기화 스크립트가 없을 때만):
 
-   - `util` 디렉토리의 `ecos_insert.sql` 생성 스크립트를 통해 sql 파일을 생성
+   - `util` 디렉토리의 `ecos_insert.sql`, `dart_insert.sql` 생성 스크립트를 통해 sql 파일을 생성
    - `db/init` 에 `0x_nameOfSqlFile.sql` 형식으로 복사 시 자동으로 초기화 시점에 반영됨.
    - MySQL 컨테이너가 이미 실행 중이라면, `docker-compose down -v` 로 볼륨을 삭제 후 재기동 필요.
 
@@ -213,7 +213,7 @@ Cloudflared 터널이 올라와 있으면 외부 사용자는 `https://korie.hyz
 
 6. 초기 MinIO bucket 생성 (minio)
 
-   - `http://korie_minio.hyzoon.dev` 접속 후, ID/PW: `minioadmin/minioadminpass`로 로그인
+   - `https://korie_minio.hyzoon.dev` 접속 후, ID/PW: `minioadmin/minioadminpass`로 로그인
    - `mlflow-artifacts` 버킷 생성
 
 7. 학습 테스트 (prod 서버에서 실행해야 함)
@@ -228,7 +228,7 @@ Cloudflared 터널이 올라와 있으면 외부 사용자는 `https://korie.hyz
 
 8. 초기 production model 설정 (MLflow UI)
 
-   - `http://korie_mlflow.hyzoon.dev` 접속 후 experiment: `LSTM_Financial_Forecast` 선택
+   - `https://korie_mlflow.hyzoon.dev` 접속 후 experiment: `LSTM_Financial_Forecast` 선택
    - 가장 최근에 학습된 run 선택 후, `Register Model` 클릭 (model name: `lstm_financial_forecast_model` 으로 생성 후 등록)
    - `model` 탭에서 해당 모델의 version 클릭 후, `Stage`를 `Production`으로 변경
 
@@ -243,5 +243,5 @@ Cloudflared 터널이 올라와 있으면 외부 사용자는 `https://korie.hyz
 
 10. 프론트 엔드 접속
 
-    - `http://korie.hyzoon.dev` 접속
+    - `https://korie.hyzoon.dev` 접속
     - `8003` 번 포트의 `be` 서버를 통해 MySQL에서 raw indicator 데이터를 읽고, `8001` 번 포트의 `inference` 서버에서 risk score를 받아와서 화면에 표시
