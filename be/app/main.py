@@ -87,6 +87,19 @@ class RiskResponse(BaseModel):
     components: Dict[str, float]
     ecos_quarters: Dict[str, Any]
     dart_vector: Dict[str, float]
+    mode: Optional[str] = None
+    manual_adjustments: Optional[Dict[str, float]] = None
+
+
+class ManualAdjustments(BaseModel):
+    construction_bsi_actual: float = 0.0
+    base_rate: float = 0.0
+    housing_sale_price: float = 0.0
+    m2_growth: float = 0.0
+
+
+class ManualRiskRequest(BaseModel):
+    adjustments: ManualAdjustments
 
 
 @lru_cache()
@@ -137,6 +150,38 @@ def _classify_risk(risk_payload: Dict[str, Any]) -> Dict[str, Any]:
             "high": RISK_THRESHOLD_HIGH,
         },
     }
+
+
+def _build_risk_response(corp_name: str, risk_payload: Dict[str, Any]) -> RiskResponse:
+    if not risk_payload.get("corp_name"):
+        risk_payload["corp_name"] = corp_name
+
+    classification = _classify_risk(risk_payload)
+
+    components: Dict[str, float] = {}
+    for key, value in risk_payload.get("components", {}).items():
+        num = _coerce_float(value)
+        if num is not None:
+            components[key] = num
+
+    dart_vector: Dict[str, float] = {}
+    for key, value in risk_payload.get("dart_vector", {}).items():
+        num = _coerce_float(value)
+        if num is not None:
+            dart_vector[key] = num
+
+    return RiskResponse(
+        corp_name=risk_payload.get("corp_name", corp_name),
+        risk_score=classification["risk_score"],
+        normalized_score=classification["normalized_score"],
+        risk_level=classification["risk_level"],
+        thresholds=classification["thresholds"],
+        components=components,
+        ecos_quarters=risk_payload.get("ecos_quarters", {}),
+        dart_vector=dart_vector,
+        mode=risk_payload.get("mode"),
+        manual_adjustments=risk_payload.get("manual_adjustments"),
+    )
 
 def save_predictions_to_db(predictions: dict):
     """예측 결과를 model_output 테이블에 저장 (UPSERT)"""
@@ -383,30 +428,38 @@ async def get_company_risk(
     if not isinstance(risk_payload, dict):
         raise HTTPException(status_code=502, detail="Unexpected response format from inference service.")
 
-    if not risk_payload.get("corp_name"):
-        risk_payload["corp_name"] = corp_name
+    return _build_risk_response(corp_name, risk_payload)
 
-    classification = _classify_risk(risk_payload)
 
-    components = {}
-    for key, value in risk_payload.get("components", {}).items():
-        num = _coerce_float(value)
-        if num is not None:
-            components[key] = num
+@app.post("/companies/{corp_name}/risk/manual", response_model=RiskResponse)
+async def get_company_manual_risk(
+    corp_name: str,
+    request_body: ManualRiskRequest,
+) -> RiskResponse:
+    if not INFERENCE_SERVER_URL:
+        raise HTTPException(status_code=500, detail="Inference server URL is not configured.")
 
-    dart_vector: Dict[str, float] = {}
-    for key, value in risk_payload.get("dart_vector", {}).items():
-        num = _coerce_float(value)
-        if num is not None:
-            dart_vector[key] = num
+    inference_url = INFERENCE_SERVER_URL.rstrip('/') + "/risk_inference/manual"
+    payload = {"corp_name": corp_name, "adjustments": request_body.adjustments.dict()}
 
-    return RiskResponse(
-        corp_name=risk_payload.get("corp_name", corp_name),
-        risk_score=classification["risk_score"],
-        normalized_score=classification["normalized_score"],
-        risk_level=classification["risk_level"],
-        thresholds=classification["thresholds"],
-        components=components,
-        ecos_quarters=risk_payload.get("ecos_quarters", {}),
-        dart_vector=dart_vector,
-    )
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(inference_url, json=payload)
+        response.raise_for_status()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Risk inference request timed out.")
+    except httpx.HTTPStatusError as exc:
+        detail = exc.response.json() if exc.response.content else exc.response.text
+        raise HTTPException(status_code=exc.response.status_code, detail=detail)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch manual risk inference result: {exc}",
+        )
+
+    risk_payload = response.json()
+    if not isinstance(risk_payload, dict):
+        raise HTTPException(status_code=502, detail="Unexpected response format from inference service.")
+
+    return _build_risk_response(corp_name, risk_payload)
+

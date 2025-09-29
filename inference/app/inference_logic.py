@@ -24,7 +24,12 @@ class RiskInferenceConfig:
 
     # Names from ECOS target columns to use for both actual/predicted features.
     # Example: ["gdp_growth", "cpi"]
-    ecos_columns: List[str] = []
+    ecos_columns: List[str] = [
+        'construction_bsi_actual', 
+        'base_rate', 
+        'housing_sale_price', 
+        'm2_growth'
+    ]
 
     # Column names from the DART aggregation vector.
     dart_columns: List[str] = [
@@ -392,12 +397,44 @@ def _extract_latest_dart_vector(
     return value_df.mean()
 
 
+def _apply_manual_adjustments(
+    base_quarter: pd.Series,
+    adjustments: Dict[str, float],
+    target_columns: List[str],
+    next_year: int,
+    next_quarter: int,
+) -> pd.Series:
+    """Apply manual adjustments to derive a next-quarter ECOS vector."""
+
+    if not isinstance(base_quarter, pd.Series):
+        raise ValueError("Base quarter must be a pandas Series.")
+
+    unknown = [key for key in adjustments if key not in target_columns]
+    if unknown:
+        raise ValueError(
+            "Manual adjustments include unknown ECOS columns: " + ", ".join(unknown)
+        )
+
+    adjusted = base_quarter.copy().astype(float)
+    for column in target_columns:
+        base_value = float(adjusted.get(column, 0.0))
+        delta = float(adjustments.get(column, 0.0) or 0.0)
+        if column == "base_rate":
+            adjusted[column] = base_value + delta
+        else:
+            adjusted[column] = base_value * (1.0 + delta / 100.0)
+
+    adjusted.name = pd.Period(f"{int(next_year)}Q{int(next_quarter)}")
+    return adjusted
+
+
 def run_heuristic_risk_inference(
     db_uri: str,
-    model: torch.nn.Module,
+    model: Optional[torch.nn.Module],
     artifacts: Dict[str, Any],
     corp_name: str,
-    months_to_predict: int = 3
+    months_to_predict: int = 3,
+    manual_adjustments: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     """Compute a heuristic risk score combining ECOS forecasts and DART fundamentals.
 
@@ -422,28 +459,49 @@ def run_heuristic_risk_inference(
         raise ValueError(f"No DART records found for corporation '{corp_name}'.")
 
     latest_dart_rows, latest_dart_year, latest_dart_quarter = _get_latest_dart_subset(dart_df)
+    ecos_columns = RiskInferenceConfig.resolve_ecos_columns(target_columns)
     latest_ecos_quarter = _extract_latest_quarterly_ecos(
         ecos_df,
-        target_columns,
+        ecos_columns,
         reference_year=latest_dart_year,
         reference_quarter=latest_dart_quarter,
     )
 
-    prediction_payload = predict_next_step(
-        db_uri=db_uri,
-        model=model,
-        artifacts=artifacts,
-        months_to_predict=months_to_predict
-    )
-    predicted_quarter = _extract_predicted_quarterly_ecos(
-        ecos_df=ecos_df,
-        predicted_months=prediction_payload.get('predictions', {}),
-        target_columns=target_columns,
-        reference_year=latest_dart_year,
-        reference_quarter=latest_dart_quarter,
-    )
+    next_year, next_quarter = _increment_quarter(latest_dart_year, latest_dart_quarter)
 
-    ecos_columns = RiskInferenceConfig.resolve_ecos_columns(target_columns)
+    manual_adjustments_clean: Optional[Dict[str, float]] = None
+    if manual_adjustments:
+        manual_adjustments_clean = {
+            key: float(value)
+            for key, value in manual_adjustments.items()
+            if value is not None
+        }
+        predicted_quarter = _apply_manual_adjustments(
+            base_quarter=latest_ecos_quarter,
+            adjustments=manual_adjustments_clean,
+            target_columns=ecos_columns,
+            next_year=next_year,
+            next_quarter=next_quarter,
+        )
+        prediction_mode = "manual"
+    else:
+        if model is None:
+            raise ValueError("Model is required when manual adjustments are not provided.")
+        prediction_payload = predict_next_step(
+            db_uri=db_uri,
+            model=model,
+            artifacts=artifacts,
+            months_to_predict=months_to_predict
+        )
+        predicted_quarter = _extract_predicted_quarterly_ecos(
+            ecos_df=ecos_df,
+            predicted_months=prediction_payload.get('predictions', {}),
+            target_columns=ecos_columns,
+            reference_year=latest_dart_year,
+            reference_quarter=latest_dart_quarter,
+        )
+        prediction_mode = "forecast"
+
     missing_actual = [col for col in ecos_columns if col not in latest_ecos_quarter]
     if missing_actual:
         raise ValueError(
@@ -505,6 +563,7 @@ def run_heuristic_risk_inference(
             "predicted": {
                 "quarter": str(predicted_quarter.name),
                 "values": {col: float(val) for col, val in predicted_quarter.to_dict().items()},
+                "source": prediction_mode,
             },
         },
         "dart_vector": dart_features,
@@ -515,6 +574,8 @@ def run_heuristic_risk_inference(
             "flag": flag_weight,
             "bias": bias,
         },
+        "mode": prediction_mode,
+        "manual_adjustments": manual_adjustments_clean,
     }
 
 

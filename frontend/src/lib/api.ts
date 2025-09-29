@@ -39,6 +39,25 @@ async function getJson<T>(path: string, params?: RequestParams): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function postJson<T>(path: string, body: unknown, params?: RequestParams): Promise<T> {
+  const url = buildUrl(path, params);
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body ?? {}),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new ApiError(detail || res.statusText, res.status);
+  }
+
+  return (await res.json()) as T;
+}
+
 export type IndicatorRecord = {
   date: string;
   values: Record<string, number>;
@@ -78,6 +97,19 @@ export type RiskResponse = {
   components: Record<string, number>;
   ecos_quarters: Record<string, unknown>;
   dart_vector: Record<string, number>;
+  mode?: string;
+  manual_adjustments?: Record<string, number> | null;
+};
+
+export type ManualIndicatorAdjustments = {
+  construction_bsi_actual: number;
+  base_rate: number;
+  housing_sale_price: number;
+  m2_growth: number;
+};
+
+export type ManualRiskRequest = {
+  adjustments: ManualIndicatorAdjustments;
 };
 
 export async function fetchIndicators(params?: RequestParams) {
@@ -96,6 +128,13 @@ export async function fetchRisk(corpName: string, monthsToPredict = 3) {
   return getJson<RiskResponse>(`/companies/${encodeURIComponent(corpName)}/risk`, {
     months_to_predict: monthsToPredict,
   });
+}
+
+export async function fetchManualRisk(corpName: string, payload: ManualRiskRequest) {
+  return postJson<RiskResponse>(
+    `/companies/${encodeURIComponent(corpName)}/risk/manual`,
+    payload
+  );
 }
 
 export { ApiError };

@@ -5,7 +5,7 @@ import torch
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 # 로직 및 모델 클래스 import
 from inference_logic import predict_next_step, run_heuristic_risk_inference
@@ -81,6 +81,32 @@ class RiskInferenceOptions(BaseModel):
         le=12,
         description="Number of future months to feed into the heuristic risk model",
     )
+
+
+class ManualIndicatorAdjustments(BaseModel):
+    construction_bsi_actual: float = Field(
+        0.0,
+        description="Percent change for the Construction BSI actual index relative to the latest quarter.",
+    )
+    base_rate: float = Field(
+        0.0,
+        description="Percentage point change to apply to the base rate for the next quarter.",
+    )
+    housing_sale_price: float = Field(
+        0.0,
+        description="Percent change for the housing sale price index relative to the latest quarter.",
+    )
+    m2_growth: float = Field(
+        0.0,
+        description="Percent change for the M2 growth metric relative to the latest quarter.",
+    )
+
+
+class ManualRiskInferenceOptions(BaseModel):
+    corp_name: str = Field(
+        ..., description="Legal name of the corporation to evaluate", min_length=1
+    )
+    adjustments: ManualIndicatorAdjustments
 
 # --- API 엔드포인트 ---
 @app.get("/")
@@ -165,3 +191,29 @@ async def risk_inference(request: Request, options: RiskInferenceOptions):
     except Exception as e:
         print(f"Unexpected error in risk_inference: {e}")
         raise HTTPException(status_code=500, detail="Internal server error during risk inference")
+
+
+@app.post("/risk_inference/manual")
+async def manual_risk_inference(request: Request, options: ManualRiskInferenceOptions):
+    model = request.app.state.model
+    artifacts = request.app.state.artifacts
+
+    if not artifacts:
+        raise HTTPException(status_code=503, detail="Artifacts are not available. Check server startup logs.")
+
+    try:
+        result = run_heuristic_risk_inference(
+            db_uri=DATABASE_URI,
+            model=model,
+            artifacts=artifacts,
+            corp_name=options.corp_name,
+            manual_adjustments=options.adjustments.dict(),
+        )
+        return result
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=f"Data processing error: {str(ve)}")
+    except ConnectionError as ce:
+        raise HTTPException(status_code=502, detail=str(ce))
+    except Exception as e:
+        print(f"Unexpected error in manual_risk_inference: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error during manual risk inference")

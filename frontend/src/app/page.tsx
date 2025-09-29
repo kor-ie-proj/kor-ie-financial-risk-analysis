@@ -16,13 +16,17 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
+    ApiError,
     fetchCompanies,
     fetchFinancials,
     fetchIndicators,
+    fetchManualRisk,
     fetchRisk,
     type CompanyListResponse,
     type FinancialResponse,
     type IndicatorResponse,
+    type ManualIndicatorAdjustments,
+    type ManualRiskRequest,
     type RiskResponse,
 } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -61,6 +65,28 @@ const cardSurface =
     'border border-border/60 bg-card/95 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-lg';
 const indicatorPillClass =
     'rounded-full border border-border/60 bg-muted/40 px-3 py-1 text-xs uppercase tracking-wide text-muted-foreground backdrop-blur-sm';
+
+const MANUAL_ADJUSTMENT_DEFAULTS: ManualIndicatorAdjustments = {
+    construction_bsi_actual: 0,
+    base_rate: 0,
+    housing_sale_price: 0,
+    m2_growth: 0,
+};
+
+const manualAdjustmentLabels: Record<keyof ManualIndicatorAdjustments, string> =
+    {
+        construction_bsi_actual: 'Construction BSI (actual)',
+        base_rate: 'Base rate',
+        housing_sale_price: 'Housing sale price index',
+        m2_growth: 'M2 growth',
+    };
+
+const manualAdjustmentHelp: Record<keyof ManualIndicatorAdjustments, string> = {
+    construction_bsi_actual: 'Percent change vs latest quarter',
+    base_rate: 'Change in percentage points',
+    housing_sale_price: 'Percent change vs latest quarter',
+    m2_growth: 'Percent change vs latest quarter',
+};
 
 const metricPriority = [
     'revenue',
@@ -275,6 +301,18 @@ function Home() {
     const [selectedCompany, setSelectedCompany] = useState<string | null>(null);
     const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
     const [indicatorRange, setIndicatorRange] = useState<IndicatorRange>('ALL');
+    const [riskMode, setRiskMode] = useState<'forecast' | 'manual'>('forecast');
+    const [manualRiskState, setManualRiskState] = useState<
+        FetchState<RiskResponse>
+    >({
+        data: null,
+        loading: false,
+        error: null,
+    });
+    const [manualAdjustments, setManualAdjustments] =
+        useState<ManualIndicatorAdjustments>({
+            ...MANUAL_ADJUSTMENT_DEFAULTS,
+        });
 
     useEffect(() => {
         let cancelled = false;
@@ -303,6 +341,12 @@ function Home() {
             cancelled = true;
         };
     }, []);
+
+    useEffect(() => {
+        setManualRiskState({ data: null, loading: false, error: null });
+        setManualAdjustments({ ...MANUAL_ADJUSTMENT_DEFAULTS });
+        setRiskMode('forecast');
+    }, [selectedCompany]);
 
     useEffect(() => {
         let cancelled = false;
@@ -434,9 +478,77 @@ function Home() {
     );
 
     const availableMetrics = financialState.data?.available_metrics ?? [];
+    const activeRiskState = riskMode === 'manual' ? manualRiskState : riskState;
+    const activeRisk = activeRiskState.data;
+    const activeRiskLoading = activeRiskState.loading;
+    const activeRiskError = activeRiskState.error;
+    const hasManualResult = Boolean(manualRiskState.data);
     const animatedNormalizedScore = useAnimatedNumber(
-        riskState.data?.normalized_score ?? null
+        activeRisk?.normalized_score ?? null
     );
+
+    const manualAdjustmentEntries = useMemo<
+        Array<{ key: keyof ManualIndicatorAdjustments; value: number }>
+    >(() => {
+        const raw = manualRiskState.data?.manual_adjustments;
+        if (!raw) {
+            return [] as Array<{
+                key: keyof ManualIndicatorAdjustments;
+                value: number;
+            }>;
+        }
+        return (
+            Object.entries(raw) as Array<
+                [keyof ManualIndicatorAdjustments, number]
+            >
+        )
+            .filter(
+                ([, value]) => !Number.isNaN(value) && Math.abs(value) > 1e-6
+            )
+            .map(([key, value]) => ({ key, value }));
+    }, [manualRiskState.data?.manual_adjustments]);
+
+    const handleManualAdjustmentChange = (
+        metric: keyof ManualIndicatorAdjustments,
+        rawValue: string
+    ) => {
+        const parsed = Number.parseFloat(rawValue);
+        setManualAdjustments((prev) => ({
+            ...prev,
+            [metric]: Number.isNaN(parsed) ? 0 : parsed,
+        }));
+    };
+
+    const handleManualRiskSubmit = async () => {
+        if (!selectedCompany) {
+            return;
+        }
+        setManualRiskState((prev) => ({ ...prev, loading: true, error: null }));
+        try {
+            const payload: ManualRiskRequest = {
+                adjustments: manualAdjustments,
+            };
+            const data = await fetchManualRisk(selectedCompany, payload);
+            setManualRiskState({ data, loading: false, error: null });
+            setRiskMode('manual');
+        } catch (error) {
+            const message =
+                error instanceof ApiError
+                    ? error.message
+                    : 'Failed to compute manual risk scenario.';
+            setManualRiskState((prev) => ({
+                ...prev,
+                loading: false,
+                error: message,
+            }));
+        }
+    };
+
+    const handleManualReset = () => {
+        setManualAdjustments({ ...MANUAL_ADJUSTMENT_DEFAULTS });
+        setManualRiskState({ data: null, loading: false, error: null });
+        setRiskMode('forecast');
+    };
 
     return (
         <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-background via-background to-muted/40 text-foreground">
@@ -555,50 +667,136 @@ function Home() {
                                 )}
                             >
                                 <CardHeader className="pb-3">
-                                    <div className="flex items-center gap-2 text-primary">
-                                        <ShieldCheck
-                                            className="h-4 w-4"
-                                            aria-hidden
-                                        />
-                                        <CardTitle className="text-base font-semibold text-foreground">
-                                            Risk Summary
-                                        </CardTitle>
+                                    <div className="flex flex-col gap-3">
+                                        <div className="flex flex-wrap items-center justify-between gap-3">
+                                            <div className="flex items-center gap-2 text-primary">
+                                                <ShieldCheck
+                                                    className="h-4 w-4"
+                                                    aria-hidden
+                                                />
+                                                <CardTitle className="text-base font-semibold text-foreground">
+                                                    Risk Summary
+                                                </CardTitle>
+                                                {/* <Badge className="border border-border/70 text-xs uppercase tracking-wide text-muted-foreground">
+                                                    {riskMode === 'manual' ? 'Manual scenario' : 'Model forecast'}
+                                                </Badge> */}
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <Button
+                                                    size="sm"
+                                                    variant={
+                                                        riskMode === 'forecast'
+                                                            ? 'secondary'
+                                                            : 'ghost'
+                                                    }
+                                                    onClick={() =>
+                                                        setRiskMode('forecast')
+                                                    }
+                                                    disabled={
+                                                        !riskState.data ||
+                                                        riskState.loading
+                                                    }
+                                                >
+                                                    Model forecast
+                                                </Button>
+                                                <Button
+                                                    size="sm"
+                                                    variant={
+                                                        riskMode === 'manual'
+                                                            ? 'secondary'
+                                                            : 'ghost'
+                                                    }
+                                                    onClick={() =>
+                                                        setRiskMode('manual')
+                                                    }
+                                                    disabled={
+                                                        !manualRiskState.data
+                                                    }
+                                                >
+                                                    Manual scenario
+                                                </Button>
+                                            </div>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">
+                                            Adjust the next-quarter macro
+                                            indicators to explore what-if risk
+                                            scores.
+                                        </p>
                                     </div>
                                 </CardHeader>
                                 <CardContent className="space-y-4">
-                                    {riskState.loading ? (
+                                    {activeRiskLoading ? (
                                         <Skeleton className="h-24 w-full" />
-                                    ) : riskState.error ? (
+                                    ) : activeRiskError ? (
                                         <div className="rounded-md bg-amber-100 px-3 py-2 text-sm text-amber-900">
-                                            {riskState.error}
+                                            {activeRiskError}
                                         </div>
-                                    ) : riskState.data ? (
+                                    ) : activeRisk ? (
                                         <div className="space-y-3">
-                                            <div className="flex items-center justify-between">
+                                            <div className="flex flex-wrap items-center justify-between gap-3">
                                                 <div>
                                                     <p className="text-xs text-muted-foreground">
                                                         Selected company
                                                     </p>
                                                     <p className="text-base font-medium">
-                                                        {
-                                                            riskState.data
-                                                                .corp_name
-                                                        }
+                                                        {activeRisk.corp_name}
                                                     </p>
                                                 </div>
                                                 <Badge
                                                     className={cn(
                                                         'border text-sm',
                                                         riskTone[
-                                                            riskState.data
+                                                            activeRisk
                                                                 .risk_level
                                                         ]
                                                     )}
                                                 >
-                                                    {riskState.data.risk_level}{' '}
-                                                    risk
+                                                    {activeRisk.risk_level} risk
                                                 </Badge>
                                             </div>
+                                            {riskMode === 'manual' &&
+                                                manualAdjustmentEntries.length >
+                                                    0 && (
+                                                    <div className="rounded-md border border-dashed border-primary/40 bg-primary/5 px-3 py-2 text-xs text-primary">
+                                                        <span className="font-medium">
+                                                            Assumptions:
+                                                        </span>{' '}
+                                                        {manualAdjustmentEntries
+                                                            .map(
+                                                                ({
+                                                                    key,
+                                                                    value,
+                                                                }) =>
+                                                                    key ===
+                                                                    'base_rate'
+                                                                        ? `${
+                                                                              manualAdjustmentLabels[
+                                                                                  key
+                                                                              ]
+                                                                          } ${
+                                                                              value >=
+                                                                              0
+                                                                                  ? '+'
+                                                                                  : ''
+                                                                          }${value.toFixed(
+                                                                              2
+                                                                          )}%p`
+                                                                        : `${
+                                                                              manualAdjustmentLabels[
+                                                                                  key
+                                                                              ]
+                                                                          } ${
+                                                                              value >=
+                                                                              0
+                                                                                  ? '+'
+                                                                                  : ''
+                                                                          }${value.toFixed(
+                                                                              1
+                                                                          )}%`
+                                                            )
+                                                            .join(' · ')}
+                                                    </div>
+                                                )}
                                             <div className="grid gap-2 text-sm">
                                                 <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
                                                     <span className="text-muted-foreground">
@@ -613,18 +811,18 @@ function Home() {
                                                 <div className="rounded-md bg-secondary px-3 py-2 text-xs text-secondary-foreground">
                                                     {
                                                         riskCopy[
-                                                            riskState.data
+                                                            activeRisk
                                                                 .risk_level
                                                         ]
                                                     }
                                                 </div>
                                                 <div className="text-xs text-muted-foreground">
                                                     High threshold ≥{' '}
-                                                    {riskState.data.thresholds.high.toFixed(
+                                                    {activeRisk.thresholds.high.toFixed(
                                                         0
                                                     )}{' '}
                                                     · Moderate threshold ≥{' '}
-                                                    {riskState.data.thresholds.medium.toFixed(
+                                                    {activeRisk.thresholds.medium.toFixed(
                                                         0
                                                     )}
                                                 </div>
@@ -636,6 +834,110 @@ function Home() {
                                             profile.
                                         </p>
                                     )}
+                                    <Separator />
+                                    <div className="space-y-3">
+                                        <div>
+                                            <p className="text-sm font-medium text-foreground">
+                                                Manual scenario inputs
+                                            </p>
+                                            <p className="text-xs text-muted-foreground">
+                                                Provide expected changes
+                                                relative to the latest quarter
+                                                averages.
+                                            </p>
+                                        </div>
+                                        <div className="grid gap-3 sm:grid-cols-2">
+                                            {(
+                                                Object.keys(
+                                                    manualAdjustments
+                                                ) as Array<
+                                                    keyof ManualIndicatorAdjustments
+                                                >
+                                            ).map((key) => (
+                                                <div
+                                                    key={key}
+                                                    className="space-y-1.5"
+                                                >
+                                                    <Label
+                                                        htmlFor={`manual-${key}`}
+                                                    >
+                                                        {
+                                                            manualAdjustmentLabels[
+                                                                key
+                                                            ]
+                                                        }
+                                                    </Label>
+                                                    <div className="flex items-center gap-2">
+                                                        <Input
+                                                            id={`manual-${key}`}
+                                                            type="number"
+                                                            inputMode="decimal"
+                                                            step={
+                                                                key ===
+                                                                'base_rate'
+                                                                    ? 0.01
+                                                                    : 0.1
+                                                            }
+                                                            value={
+                                                                manualAdjustments[
+                                                                    key
+                                                                ]
+                                                            }
+                                                            onChange={(event) =>
+                                                                handleManualAdjustmentChange(
+                                                                    key,
+                                                                    event.target
+                                                                        .value
+                                                                )
+                                                            }
+                                                            disabled={
+                                                                !selectedCompany ||
+                                                                riskState.loading
+                                                            }
+                                                        />
+                                                        <span className="text-xs text-muted-foreground">
+                                                            {
+                                                                manualAdjustmentHelp[
+                                                                    key
+                                                                ]
+                                                            }
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        {manualRiskState.error && (
+                                            <div className="rounded-md bg-amber-100 px-3 py-2 text-xs text-amber-900">
+                                                {manualRiskState.error}
+                                            </div>
+                                        )}
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <Button
+                                                size="sm"
+                                                onClick={handleManualRiskSubmit}
+                                                disabled={
+                                                    !selectedCompany ||
+                                                    riskState.loading ||
+                                                    manualRiskState.loading
+                                                }
+                                            >
+                                                {manualRiskState.loading
+                                                    ? 'Calculating…'
+                                                    : 'Calculate scenario'}
+                                            </Button>
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                onClick={handleManualReset}
+                                                disabled={
+                                                    !hasManualResult &&
+                                                    !manualRiskState.loading
+                                                }
+                                            >
+                                                Reset
+                                            </Button>
+                                        </div>
+                                    </div>
                                 </CardContent>
                             </Card>
 
