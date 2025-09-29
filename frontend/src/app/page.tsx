@@ -309,10 +309,7 @@ function Home() {
         loading: false,
         error: null,
     });
-    const [manualAdjustments, setManualAdjustments] =
-        useState<ManualIndicatorAdjustments>({
-            ...MANUAL_ADJUSTMENT_DEFAULTS,
-        });
+
 
     useEffect(() => {
         let cancelled = false;
@@ -508,14 +505,19 @@ function Home() {
             .map(([key, value]) => ({ key, value }));
     }, [manualRiskState.data?.manual_adjustments]);
 
+    const [manualAdjustments, setManualAdjustments] = useState<
+        Record<keyof ManualIndicatorAdjustments, number | string>
+    >({
+        ...MANUAL_ADJUSTMENT_DEFAULTS,
+    });
+
     const handleManualAdjustmentChange = (
         metric: keyof ManualIndicatorAdjustments,
         rawValue: string
     ) => {
-        const parsed = Number.parseFloat(rawValue);
         setManualAdjustments((prev) => ({
             ...prev,
-            [metric]: Number.isNaN(parsed) ? 0 : parsed,
+            [metric]: rawValue,
         }));
     };
 
@@ -525,8 +527,18 @@ function Home() {
         }
         setManualRiskState((prev) => ({ ...prev, loading: true, error: null }));
         try {
+            const parsedAdjustments = Object.fromEntries(
+                Object.entries(manualAdjustments).map(([key, value]) => {
+                    const parsed =
+                        typeof value === 'number'
+                            ? value
+                            : parseFloat(value);
+                    return [key, isNaN(parsed) ? 0 : parsed];
+                })
+            ) as ManualIndicatorAdjustments;
+
             const payload: ManualRiskRequest = {
-                adjustments: manualAdjustments,
+                adjustments: parsedAdjustments,
             };
             const data = await fetchManualRisk(selectedCompany, payload);
             setManualRiskState({ data, loading: false, error: null });
