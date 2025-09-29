@@ -28,6 +28,7 @@ services:
         volumes:
             - mysql_data:/var/lib/mysql
             - ./db/init:/docker-entrypoint-initdb.d
+            - ./db/my.cnf:/etc/mysql/conf.d/my.cnf:ro
         networks: [risknet]
 
     mlflow:
