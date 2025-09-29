@@ -20,3 +20,11 @@ minio_data/
 
 # codex
 .prompt/
+
+# cloudflare
+.cloudflared/
+nohup.out
+
+# agent md
+GEMINI.md
+AGENTS.md

@@ -28,6 +28,7 @@ services:
         volumes:
             - mysql_data:/var/lib/mysql
             - ./db/init:/docker-entrypoint-initdb.d
+            - ./db/my.cnf:/etc/mysql/conf.d/my.cnf:ro
         networks: [risknet]
 
     mlflow:
@@ -93,8 +94,8 @@ services:
         environment:
             - PYTHONUNBUFFERED=1
             - DATABASE_URI=${DB_URI}
-            - INFERENCE_SERVER_URL=http://inference:8000
-            - ALLOWED_ORIGINS=http://localhost:3000,http://frontend:3000
+            - INFERENCE_SERVER_URL=${INFERENCE_SERVER_URL:-http://inference:8000}
+            - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://frontend:3000}
         depends_on:
             - mysql
             - inference
@@ -106,7 +107,7 @@ services:
         ports:
             - "3000:3000"
         environment:
-            - NEXT_PUBLIC_API_BASE_URL=http://localhost:8003
+            - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8003}
         depends_on:
             - be
         networks: [risknet]

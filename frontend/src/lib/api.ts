@@ -1,5 +1,6 @@
 const API_BASE = (
-    process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8003'
+    // process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8003'
+    'https://korie.hyzoon.dev/api'	// 이상하게 환경변수 주입이 안되서 하드코딩
 ).replace(/\/+$/, '');
 
 type RequestParams = Record<string, string | number | undefined>;

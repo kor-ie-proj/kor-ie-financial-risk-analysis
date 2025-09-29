@@ -4,7 +4,9 @@ from fastapi import (
     FastAPI,
     HTTPException,
     Query,
+    Request
 )
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import os
@@ -20,7 +22,16 @@ DATABASE_URI = os.environ.get("DATABASE_URI")
 if not DATABASE_URI:
     raise RuntimeError("DATABASE_URI must be set for the BE service to function.")
 
-engine = create_engine(DATABASE_URI)
+if not INFERENCE_SERVER_URL:
+    raise RuntimeError("INFERENCE_SERVER_URL must be set for the BE service to function.")
+
+INFERENCE_BASE_URL = INFERENCE_SERVER_URL.rstrip('/')
+
+engine = create_engine(
+    DATABASE_URI,
+    pool_pre_ping=True,
+    connect_args={"charset": "utf8mb4"}
+)
 
 app = FastAPI()
 
@@ -188,9 +199,9 @@ def save_predictions_to_db(predictions: dict):
     except Exception as e:
         print(f"Error saving predictions to DB: {e}")
 
-@app.get("/predict", response_model=PredictResponse)
+@app.get("/api/predict", response_model=PredictResponse)
 async def get_financial_prediction(background_tasks: BackgroundTasks):
-    if not DATABASE_URI or not INFERENCE_SERVER_URL:
+    if not DATABASE_URI or not INFERENCE_BASE_URL:
         raise HTTPException(status_code=500, detail="Server configuration error.")
 
     try:
@@ -202,7 +213,7 @@ async def get_financial_prediction(background_tasks: BackgroundTasks):
         # 2. Inference 서버에 요청
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
-                INFERENCE_SERVER_URL,
+                f"{INFERENCE_BASE_URL}/predict",
                 json={"raw_data": raw_df_sorted.to_dict('records')}
             )
         response.raise_for_status()
@@ -219,12 +230,12 @@ async def get_financial_prediction(background_tasks: BackgroundTasks):
         raise HTTPException(status_code=500, detail=f"An error occurred in BE server: {e}")
 
 
-@app.get("/health")
+@app.get("/api/health")
 def health_check() -> Dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "좋아"}
 
 
-@app.get("/indicators", response_model=IndicatorResponse)
+@app.get("/api/indicators", response_model=IndicatorResponse)
 def get_indicators(
     columns: Optional[str] = Query(
         None,
@@ -277,7 +288,7 @@ def get_indicators(
     return IndicatorResponse(columns=requested, data=records)
 
 
-@app.get("/companies", response_model=CompanyListResponse)
+@app.get("/api/companies", response_model=CompanyListResponse)
 def list_companies(
     q: Optional[str] = Query(None, description="Substring to match against corp_name."),
     limit: int = Query(50, ge=1, le=200, description="Maximum number of companies to return."),
@@ -298,7 +309,7 @@ def list_companies(
     return CompanyListResponse(companies=companies)
 
 
-@app.get("/companies/{corp_name}/financials", response_model=FinancialResponse)
+@app.get("/api/companies/{corp_name}/financials", response_model=FinancialResponse)
 def get_company_financials(
     corp_name: str,
     metrics: Optional[str] = Query(
@@ -368,7 +379,7 @@ def get_company_financials(
     )
 
 
-@app.get("/companies/{corp_name}/risk", response_model=RiskResponse)
+@app.get("/api/companies/{corp_name}/risk", response_model=RiskResponse)
 async def get_company_risk(
     corp_name: str,
     months_to_predict: int = Query(
@@ -378,10 +389,9 @@ async def get_company_risk(
         description="Number of future months to include in the risk inference request.",
     ),
 ) -> RiskResponse:
-    if not INFERENCE_SERVER_URL:
+    if not INFERENCE_BASE_URL:
         raise HTTPException(status_code=500, detail="Inference server URL is not configured.")
-
-    inference_url = INFERENCE_SERVER_URL.rstrip('/') + "/risk_inference"
+    inference_url = f"{INFERENCE_BASE_URL}/risk_inference"
     payload = {"corp_name": corp_name, "months_to_predict": months_to_predict}
 
     try:
@@ -420,15 +430,15 @@ async def get_company_risk(
     return _build_risk_response(corp_name, risk_payload)
 
 
-@app.post("/companies/{corp_name}/risk/manual", response_model=RiskResponse)
+@app.post("/api/companies/{corp_name}/risk/manual", response_model=RiskResponse)
 async def get_company_manual_risk(
     corp_name: str,
     request_body: ManualRiskRequest,
 ) -> RiskResponse:
-    if not INFERENCE_SERVER_URL:
+    if not INFERENCE_BASE_URL:
         raise HTTPException(status_code=500, detail="Inference server URL is not configured.")
 
-    inference_url = INFERENCE_SERVER_URL.rstrip('/') + "/risk_inference/manual"
+    inference_url = f"{INFERENCE_BASE_URL}/risk_inference/manual"
     payload = {"corp_name": corp_name, "adjustments": request_body.adjustments.dict()}
 
     try:
@@ -446,9 +456,20 @@ async def get_company_manual_risk(
             detail=f"Failed to fetch manual risk inference result: {exc}",
         )
 
-    risk_payload = response.json()
-    if not isinstance(risk_payload, dict):
+    result = response.json()
+    if not isinstance(result, dict):
         raise HTTPException(status_code=502, detail="Unexpected response format from inference service.")
+
+    risk_payload = {
+        "corp_name": result.get("corp_name", corp_name),
+        "risk_score": result.get("heuristic_score"),
+        "risk_level": result.get("risk_level"),
+        "components": result.get("components", {}),
+        "ecos_quarters": result.get("ecos_quarters", {}),
+        "dart_vector": result.get("dart_vector", {}),
+        "mode": result.get("mode"),
+        "manual_adjustments": result.get("manual_adjustments"),
+    }
 
     return _build_risk_response(corp_name, risk_payload)
 
