@@ -101,12 +101,14 @@ const riskTone: Record<RiskResponse['risk_level'], string> = {
     Low: 'bg-emerald-100 text-emerald-800 border-emerald-200',
     Moderate: 'bg-amber-100 text-amber-900 border-amber-200',
     High: 'bg-rose-100 text-rose-900 border-rose-200',
+    Critical: 'bg-red-100 text-red-900 border-red-200',
 };
 
 const riskCopy: Record<RiskResponse['risk_level'], string> = {
     Low: 'Solid fundamentals with limited near-term stress.',
     Moderate: 'Monitor liquidity and macro exposure closely.',
     High: 'Elevated risk detected. Consider mitigation plans.',
+    Critical: 'Immediate action required. High default risk.',
 };
 
 const compactCurrency = new Intl.NumberFormat('en-US', {
@@ -310,7 +312,6 @@ function Home() {
         error: null,
     });
 
-
     useEffect(() => {
         let cancelled = false;
         async function loadIndicators() {
@@ -480,9 +481,7 @@ function Home() {
     const activeRiskLoading = activeRiskState.loading;
     const activeRiskError = activeRiskState.error;
     const hasManualResult = Boolean(manualRiskState.data);
-    const animatedNormalizedScore = useAnimatedNumber(
-        activeRisk?.normalized_score ?? null
-    );
+    const animatedRiskScore = useAnimatedNumber(activeRisk?.risk_score ?? null);
 
     const manualAdjustmentEntries = useMemo<
         Array<{ key: keyof ManualIndicatorAdjustments; value: number }>
@@ -530,9 +529,7 @@ function Home() {
             const parsedAdjustments = Object.fromEntries(
                 Object.entries(manualAdjustments).map(([key, value]) => {
                     const parsed =
-                        typeof value === 'number'
-                            ? value
-                            : parseFloat(value);
+                        typeof value === 'number' ? value : parseFloat(value);
                     return [key, isNaN(parsed) ? 0 : parsed];
                 })
             ) as ManualIndicatorAdjustments;
@@ -778,33 +775,56 @@ function Home() {
                                                                 ({
                                                                     key,
                                                                     value,
-                                                                }) =>
-                                                                    key ===
-                                                                    'base_rate'
-                                                                        ? `${
-                                                                              manualAdjustmentLabels[
-                                                                                  key
-                                                                              ]
-                                                                          } ${
-                                                                              value >=
-                                                                              0
-                                                                                  ? '+'
-                                                                                  : ''
-                                                                          }${value.toFixed(
-                                                                              2
-                                                                          )}%p`
-                                                                        : `${
-                                                                              manualAdjustmentLabels[
-                                                                                  key
-                                                                              ]
-                                                                          } ${
-                                                                              value >=
-                                                                              0
-                                                                                  ? '+'
-                                                                                  : ''
-                                                                          }${value.toFixed(
-                                                                              1
-                                                                          )}%`
+                                                                }) => {
+                                                                    const safeValue =
+                                                                        typeof value ===
+                                                                            'number' &&
+                                                                        !isNaN(
+                                                                            value
+                                                                        )
+                                                                            ? value
+                                                                            : null;
+                                                                    if (
+                                                                        key ===
+                                                                        'base_rate'
+                                                                    ) {
+                                                                        return `${
+                                                                            manualAdjustmentLabels[
+                                                                                key
+                                                                            ]
+                                                                        } ${
+                                                                            safeValue !==
+                                                                            null
+                                                                                ? (safeValue >=
+                                                                                  0
+                                                                                      ? '+'
+                                                                                      : '') +
+                                                                                  safeValue.toFixed(
+                                                                                      2
+                                                                                  ) +
+                                                                                  '%p'
+                                                                                : '-'
+                                                                        }`;
+                                                                    } else {
+                                                                        return `${
+                                                                            manualAdjustmentLabels[
+                                                                                key
+                                                                            ]
+                                                                        } ${
+                                                                            safeValue !==
+                                                                            null
+                                                                                ? (safeValue >=
+                                                                                  0
+                                                                                      ? '+'
+                                                                                      : '') +
+                                                                                  safeValue.toFixed(
+                                                                                      1
+                                                                                  ) +
+                                                                                  '%'
+                                                                                : '-'
+                                                                        }`;
+                                                                    }
+                                                                }
                                                             )
                                                             .join(' · ')}
                                                     </div>
@@ -812,12 +832,18 @@ function Home() {
                                             <div className="grid gap-2 text-sm">
                                                 <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
                                                     <span className="text-muted-foreground">
-                                                        Normalized score
+                                                        Risk score
                                                     </span>
                                                     <span className="font-semibold">
-                                                        {animatedNormalizedScore.toFixed(
-                                                            1
-                                                        )}
+                                                        {typeof animatedRiskScore ===
+                                                            'number' &&
+                                                        !isNaN(
+                                                            animatedRiskScore
+                                                        )
+                                                            ? animatedRiskScore.toFixed(
+                                                                  1
+                                                              )
+                                                            : '-'}
                                                     </span>
                                                 </div>
                                                 <div className="rounded-md bg-secondary px-3 py-2 text-xs text-secondary-foreground">
@@ -829,14 +855,43 @@ function Home() {
                                                     }
                                                 </div>
                                                 <div className="text-xs text-muted-foreground">
-                                                    High threshold ≥{' '}
-                                                    {activeRisk.thresholds.high.toFixed(
-                                                        0
-                                                    )}{' '}
+                                                    Critical threshold ≥{' '}
+                                                    {typeof activeRisk
+                                                        ?.thresholds?.danger ===
+                                                        'number' &&
+                                                    !isNaN(
+                                                        activeRisk.thresholds
+                                                            .danger
+                                                    )
+                                                        ? activeRisk.thresholds.danger.toFixed(
+                                                              0
+                                                          )
+                                                        : '-'}{' '}
+                                                    · High threshold ≥{' '}
+                                                    {typeof activeRisk
+                                                        ?.thresholds
+                                                        ?.caution ===
+                                                        'number' &&
+                                                    !isNaN(
+                                                        activeRisk.thresholds
+                                                            .caution
+                                                    )
+                                                        ? activeRisk.thresholds.caution.toFixed(
+                                                              0
+                                                          )
+                                                        : '-'}
                                                     · Moderate threshold ≥{' '}
-                                                    {activeRisk.thresholds.medium.toFixed(
-                                                        0
-                                                    )}
+                                                    {typeof activeRisk
+                                                        ?.thresholds?.safe ===
+                                                        'number' &&
+                                                    !isNaN(
+                                                        activeRisk.thresholds
+                                                            .safe
+                                                    )
+                                                        ? activeRisk.thresholds.safe.toFixed(
+                                                              0
+                                                          )
+                                                        : '-'}
                                                 </div>
                                             </div>
                                         </div>

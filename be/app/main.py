@@ -38,8 +38,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-RISK_THRESHOLD_HIGH = float(os.environ.get("RISK_THRESHOLD_HIGH", "120"))
-RISK_THRESHOLD_MEDIUM = float(os.environ.get("RISK_THRESHOLD_MEDIUM", "80"))
 DEFAULT_INDICATOR_COLUMNS = [
     col.strip()
     for col in os.environ.get("DEFAULT_INDICATORS", "construction_bsi_actual,base_rate,housing_sale_price").split(",")
@@ -81,7 +79,6 @@ class FinancialResponse(BaseModel):
 class RiskResponse(BaseModel):
     corp_name: str
     risk_score: float
-    normalized_score: float
     risk_level: str
     thresholds: Dict[str, float]
     components: Dict[str, float]
@@ -127,36 +124,11 @@ def _coerce_float(value: Any) -> Optional[float]:
         return None
 
 
-def _classify_risk(risk_payload: Dict[str, Any]) -> Dict[str, Any]:
-    risk_score = float(risk_payload.get("risk_score", 0.0))
-    ecos_weights = risk_payload.get("weights", {}).get("ecos", {})
-    dart_weights = risk_payload.get("weights", {}).get("dart", {})
-    feature_count = max(len(ecos_weights) + len(dart_weights), 1)
-    normalized_score = risk_score / feature_count
-
-    if normalized_score >= RISK_THRESHOLD_HIGH:
-        risk_level = "High"
-    elif normalized_score >= RISK_THRESHOLD_MEDIUM:
-        risk_level = "Moderate"
-    else:
-        risk_level = "Low"
-
-    return {
-        "risk_score": risk_score,
-        "normalized_score": normalized_score,
-        "risk_level": risk_level,
-        "thresholds": {
-            "medium": RISK_THRESHOLD_MEDIUM,
-            "high": RISK_THRESHOLD_HIGH,
-        },
-    }
 
 
 def _build_risk_response(corp_name: str, risk_payload: Dict[str, Any]) -> RiskResponse:
     if not risk_payload.get("corp_name"):
         risk_payload["corp_name"] = corp_name
-
-    classification = _classify_risk(risk_payload)
 
     components: Dict[str, float] = {}
     for key, value in risk_payload.get("components", {}).items():
@@ -172,10 +144,13 @@ def _build_risk_response(corp_name: str, risk_payload: Dict[str, Any]) -> RiskRe
 
     return RiskResponse(
         corp_name=risk_payload.get("corp_name", corp_name),
-        risk_score=classification["risk_score"],
-        normalized_score=classification["normalized_score"],
-        risk_level=classification["risk_level"],
-        thresholds=classification["thresholds"],
+        risk_score=risk_payload.get("risk_score", 0.0),
+        risk_level=risk_payload.get("risk_level", "Unknown"),
+        thresholds=risk_payload.get("thresholds", {
+            "safe": 21,
+            "caution": 36.45,
+            "danger": 56.42
+        }),
         components=components,
         ecos_quarters=risk_payload.get("ecos_quarters", {}),
         dart_vector=dart_vector,
@@ -424,9 +399,23 @@ async def get_company_risk(
             detail=f"Failed to fetch risk inference result: {exc}",
         )
 
-    risk_payload = response.json()
-    if not isinstance(risk_payload, dict):
+    result = response.json()
+    if not isinstance(result, dict):
         raise HTTPException(status_code=502, detail="Unexpected response format from inference service.")
+
+    # Map new inference result fields to legacy risk_payload structure
+    risk_payload = {
+        "corp_name": result.get("corp_name", corp_name),
+        "risk_score": result.get("heuristic_score"),
+        "risk_level": result.get("risk_level"),
+        "components": result.get("components", {}),
+        "weights": result.get("weights", {}),
+        "ecos_quarters": result.get("ecos_quarters", {}),
+        "dart_vector": result.get("dart_vector", {}),
+        "mode": result.get("mode"),
+        "manual_adjustments": result.get("manual_adjustments"),
+    }
+    # For backward compatibility: if latest_dart_quarter or next_ecos_quarter needed, add here
 
     return _build_risk_response(corp_name, risk_payload)
 
