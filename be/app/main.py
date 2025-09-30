@@ -147,9 +147,9 @@ def _build_risk_response(corp_name: str, risk_payload: Dict[str, Any]) -> RiskRe
         risk_score=risk_payload.get("risk_score", 0.0),
         risk_level=risk_payload.get("risk_level", "Unknown"),
         thresholds=risk_payload.get("thresholds", {
-            "safe": 21,
-            "caution": 36.45,
-            "danger": 56.42
+            "safe": 35,
+            "caution": 59,
+            "danger": 85
         }),
         components=components,
         ecos_quarters=risk_payload.get("ecos_quarters", {}),

@@ -13,22 +13,22 @@ _QUARTER_MONTHS: Dict[int, Tuple[int, int, int]] = {
 
 # 문서의 13개 휴리스틱 가중치 (합=1.0)
 HEURISTIC_WEIGHTS = {
-    # 재무지표 73.4%
-    "flag_score": 0.2186,
-    "debt_score": 0.1648,
-    "equity_score": 0.1041,
-    "roa_score": 0.1165,
-    "roe_score": 0.0219,
-    "sales_growth_score": 0.0219,
-    "profit_growth_score": 0.0112,
-    "net_growth_score": 0.0476,
-    
-    # 경제지표 26.6%
-    "bsi_score": 0.0852,
-    "rate_score": 0.0749,
-    "housing_score": 0.0088,
-    "m2_score": 0.0667,
-    #"spread_score": 0.0577,
+    # 재무지표 82.07%
+    "flag_score": 0.3774,
+    "debt_score": 0.1887,
+    "equity_score": 0.0943,
+    "roa_score": 0.0849,
+    "roe_score": 0.0094,
+    "sales_growth_score": 0.0094,
+    "profit_growth_score": 0.0377,
+    "net_growth_score": 0.0189,
+
+    # 경제지표 17.93%
+    "bsi_score": 0.0189,
+    "rate_score": 0.0189,
+    "housing_score": 0.0283,
+    "m2_score": 0.0943,
+    #"spread_score": 0.0189,
 }
 
 # 재무 지표별 클리핑 범위 (모델 명세대로)
@@ -678,11 +678,11 @@ def run_heuristic_risk_inference(
     def _label(score: float) -> str:
         # 문서 예시(안전/주의/위험/매우위험) 기준 스레숄드는 업무정책에 맞춰 조정.
         # 여기서는 경험적 기준: 0-25 안전, 25-50 주의, 50-75 위험, 75-100 매우위험
-        if score <= 21:
+        if score <= 35:
             return "Low"
-        elif score <= 35.45:
+        elif score <= 59:
             return "Moderate"
-        elif score <= 56.42:
+        elif score <= 85:
             return "High"
         else:
             return "Critical"
